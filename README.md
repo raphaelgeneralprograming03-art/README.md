@@ -1,15 +1,3 @@
-const express = require('express');
-const app = express();
-const http = require('http').createServer(app);
-
-// Configura o canal de comunicação em tempo real (Socket.io)
-const io = require('socket.io')(http, {
-    cors: { origin: "*", methods: ["GET", "POST"] }
-});
-
-// 🌐 AQUI ESTÁ A UNIFICAÇÃO: O servidor entrega o HTML, CSS e JS direto na tela do usuário
-app.get('/', (req, res) => {
-    res.send(`
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -17,32 +5,34 @@ app.get('/', (req, res) => {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Espelhamento de Tela Ultra Rápido</title>
     
-    <!-- 🎨 CÓDIGO CSS (VISUAL) -->
+    <!-- 🎨 ESTILO VISUAL -->
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
         body { background-color: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
         .container { text-align: center; max-width: 800px; width: 100%; }
-        h1 { font-size: 2.2rem; margin-bottom: 10px; color: #38bdf8; }
+        h1 { font-size: 2.5rem; margin-bottom: 10px; color: #38bdf8; }
         p { color: #94a3b8; margin-bottom: 20px; }
         .link-box { background: #1e293b; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px dashed #38bdf8; display: none; }
-        .link-text { color: #38bdf8; font-weight: bold; word-break: break-all; margin-top: 5px; }
+        .link-text { color: #38bdf8; font-weight: bold; word-break: break-all; }
         .video-container { background-color: #1e293b; border-radius: 12px; overflow: hidden; aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center; margin-bottom: 25px; border: 2px solid #334155; }
         video { width: 100%; height: 100%; object-fit: contain; }
-        .btn { padding: 12px 24px; font-size: 1rem; font-weight: 600; border: none; border-radius: 8px; cursor: pointer; background-color: #0284c7; color: white; transition: 0.2s; }
-        .btn:hover { background-color: #0369a1; }
+        .controls { display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; }
+        .btn { padding: 12px 24px; font-size: 1rem; font-weight: 600; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s; }
+        .btn.primary { background-color: #0284c7; color: white; }
+        .btn.primary:hover { background-color: #0369a1; }
         .status { margin-top: 15px; color: #10b981; font-weight: 500; }
     </style>
 
-    <!-- BIBLIOTECA DE CONEXÃO -->
-    <script src="/socket.io/socket.io.js"></script>
+    <!-- 🌐 IMPORTANDO A BIBLIOTECA DE COMUNICAÇÃO EM TEMPO REAL -->
+    <script src="https://socket.io"></script>
 </head>
 <body>
 
-    <!-- 🌐 CÓDIGO HTML (ESTRUTURA) -->
     <div class="container">
         <h1>Painel de Transmissão Síncrona</h1>
         <p>Compartilhe sua tela em milissegundos entre Android, iOS, Linux e Mac.</p>
         
+        <!-- Caixa que vai mostrar o link gerado para enviar para o outro dispositivo -->
         <div id="linkBox" class="link-box">
             <span>Envie este link para quem vai assistir:</span>
             <div id="shareLink" class="link-text">Gerando link...</div>
@@ -53,15 +43,18 @@ app.get('/', (req, res) => {
         </div>
 
         <div class="controls">
-            <button id="startBtn" class="btn">📺 Transmitir Minha Tela</button>
+            <button id="startBtn" class="btn primary">📺 Transmitir Minha Tela</button>
         </div>
         
         <div id="statusText" class="status">Conectando ao sistema...</div>
     </div>
 
-    <!-- ⚙️ CÓDIGO JAVASCRIPT (LÓGICA DO WEBRTC) -->
+    <!-- ⚙️ LÓGICA DO WEBRTC + SOCKET.IO -->
     <script>
-        const socket = io(); // Conecta automaticamente no mesmo link do servidor
+        // ⚠️ ATENÇÃO: Quando você hospedar seu servidor, substitua o link abaixo pelo link do seu servidor hospedado!
+        const URL_DO_SERVIDOR = "http://localhost:3000"; 
+        
+        const socket = io(URL_DO_SERVIDOR);
         const videoElement = document.getElementById('screenVideo');
         const startBtn = document.getElementById('startBtn');
         const linkBox = document.getElementById('linkBox');
@@ -71,58 +64,73 @@ app.get('/', (req, res) => {
         let localStream;
         let peerConnection;
         
+        // Descobre se já entramos por um link existente ou se vamos criar um novo
         const urlParams = new URLSearchParams(window.location.search);
         let salaId = urlParams.get('sala');
         
         if (!salaId) {
+            // Se não tem sala no link, cria um código aleatório (você é o transmissor)
             salaId = Math.random().toString(36).substring(2, 9);
-            window.history.replaceState({}, '', \`?sala=\${salaId}\`);
+            window.history.replaceState({}, '', `?sala=${salaId}`);
         }
 
         const config = { iceServers: [{ urls: 'stun:://google.com' }] };
 
+        // Ao conectar no servidor de sinalização
         socket.on('connect', () => {
-            statusText.innerText = "Conectado! Pronto para parear.";
+            statusText.innerText = "Conectado ao sistema! Pronto para parear.";
             socket.emit('entrar-na-sala', salaId);
+            
+            // Mostra o link completo na tela para ser copiado
             shareLink.innerText = window.location.href;
             linkBox.style.display = "block";
         });
 
+        // Transmissor: Captura e envia a tela
         startBtn.addEventListener('click', async () => {
             try {
                 localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
                 videoElement.srcObject = localStream;
-                statusText.innerText = "Transmitindo! Aguardando o receptor abrir o link...";
+                statusText.innerText = "Transmitindo! Aguardando receptor abrir o link...";
                 
+                // Configura a conexão estruturada do WebRTC
                 criarPeerConnection();
                 localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
                 
+                // Cria o convite de conexão (Offer)
                 const offer = await peerConnection.createOffer();
                 await peerConnection.setLocalDescription(offer);
+                
+                // Envia o convite pelo servidor de sinalização
                 socket.emit('mensagem-sinalizacao', { salaId, sdp: peerConnection.localDescription });
             } catch (err) {
-                alert("Erro ao compartilhar tela. Lembre-se que iOS só pode assistir.");
+                alert("Erro ao compartilhar tela. Certifique-se de usar HTTPS.");
             }
         });
 
+        // Função que configura os "fios" da transmissão ponto a ponto (P2P)
         function criarPeerConnection() {
             peerConnection = new RTCPeerConnection(config);
 
+            // Quando o sinal de internet de um encontra o do outro
             peerConnection.onicecandidate = (event) => {
                 if (event.candidate) {
                     socket.emit('mensagem-sinalizacao', { salaId, candidate: event.candidate });
                 }
             };
 
+            // Receptor: Quando o vídeo do transmissor chega, joga na tela
             peerConnection.ontrack = (event) => {
                 videoElement.srcObject = event.streams[0];
-                statusText.innerText = "Transmissão conectada ao vivo!";
+                statusText.innerText = "Transmissão conectada em tempo real!";
             };
         }
 
+        // Ouvindo as mensagens que passam pelo Servidor de Sinalização
         socket.on('mensagem-sinalizacao', async (dados) => {
             if (!peerConnection) criarPeerConnection();
 
+            // Se recebeu um convite de transmissão (Offer)
             if (dados.sdp && dados.sdp.type === 'offer') {
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(dados.sdp));
                 const answer = await peerConnection.createAnswer();
@@ -130,9 +138,11 @@ app.get('/', (req, res) => {
                 socket.emit('mensagem-sinalizacao', { salaId, sdp: peerConnection.localDescription });
                 statusText.innerText = "Conectando ao transmissor...";
             } 
+            // Se recebeu a resposta do convite (Answer)
             else if (dados.sdp && dados.sdp.type === 'answer') {
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(dados.sdp));
             } 
+            // Se recebeu os caminhos de rede (ICE Candidates)
             else if (dados.candidate) {
                 await peerConnection.addIceCandidate(new RTCIceCandidate(dados.candidate));
             }
@@ -140,22 +150,3 @@ app.get('/', (req, res) => {
     </script>
 </body>
 </html>
-    `);
-});
-
-// 📡 LÓGICA DO SERVIDOR DE SINALIZAÇÃO
-io.on('connection', (socket) => {
-    socket.on('entrar-na-sala', (salaId) => {
-        socket.join(salaId);
-        socket.to(salaId).emit('novo-usuario', socket.id);
-    });
-
-    socket.on('mensagem-sinalizacao', (dados) => {
-        socket.to(dados.salaId).emit('mensagem-sinalizacao', dados);
-    });
-});
-
-const PORT = process.env.PORT || 3000;
-http.listen(PORT, () => {
-    console.log(`Sistema rodando na porta ${PORT}`);
-});
